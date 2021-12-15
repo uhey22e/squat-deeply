@@ -51,6 +51,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
   bool _playing = false;
   KeyPoints? _keyPoints;
   double _frameRate = 0;
+  Widget? _deepAlert;
 
   @override
   void initState() {
@@ -82,18 +83,29 @@ class _SquatCamPageState extends State<SquatCamPage> {
     ];
 
     if (_keyPoints != null) {
-      // final kp = KeyPoints.average(_rawKeyPoints.toList());
       final kp = _keyPoints!;
-      // keypoints
       previewStack
           .add(KeyPointsPreview(keyPoints: kp, width: width, height: height));
 
-      if (kp.pose == SquatState.underParallel) {
-        previewStack.add(Container(
+      if (kp.pose == SquatState.underParallel && _deepAlert == null) {
+        _deepAlert = Container(
           width: width,
           height: height,
-          color: Colors.amber.withOpacity(0.3),
-        ));
+          alignment: Alignment.center,
+          child: const Text("深い!!",
+              style: TextStyle(
+                  color: Colors.redAccent,
+                  fontSize: 100,
+                  fontWeight: FontWeight.w800)),
+        );
+        Timer(const Duration(seconds: 1), () {
+          setState(() {
+            _deepAlert = null;
+          });
+        });
+      }
+      if (_deepAlert != null) {
+        previewStack.add(_deepAlert!);
       }
 
       final msgs = [

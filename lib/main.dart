@@ -52,7 +52,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
   bool _playing = false;
   SquatCounter _counter = const SquatCounter.init();
   double _frameRate = 0;
-  Widget? _deepAlert;
+  Widget? _shallowAlert;
 
   @override
   void initState() {
@@ -83,31 +83,33 @@ class _SquatCamPageState extends State<SquatCamPage> {
       CamView(cameraController: _cameraController),
     ];
 
-    if (_counter.movingAverage != null) {
-      final kp = _counter.movingAverage!;
+    if (_shallowAlert == null &&
+        _counter.state == SquatState.standing &&
+        _counter.prevState == SquatState.sittingToParallel) {
+      _shallowAlert = Container(
+        width: width,
+        height: height,
+        alignment: Alignment.center,
+        child: const Text("浅い!!",
+            style: TextStyle(
+                color: Colors.redAccent,
+                fontSize: 100,
+                fontWeight: FontWeight.w800)),
+      );
+      Timer(const Duration(seconds: 1), () {
+        setState(() {
+          _shallowAlert = null;
+        });
+      });
+    }
+    if (_shallowAlert != null) {
+      previewStack.add(_shallowAlert!);
+    }
+
+    if (_counter.last != null) {
+      final kp = _counter.last!;
       previewStack
           .add(KeyPointsPreview(keyPoints: kp, width: width, height: height));
-
-      if (kp.pose == SquatState.underParallel && _deepAlert == null) {
-        _deepAlert = Container(
-          width: width,
-          height: height,
-          alignment: Alignment.center,
-          child: const Text("深い!!",
-              style: TextStyle(
-                  color: Colors.redAccent,
-                  fontSize: 100,
-                  fontWeight: FontWeight.w800)),
-        );
-        Timer(const Duration(seconds: 1), () {
-          setState(() {
-            _deepAlert = null;
-          });
-        });
-      }
-      if (_deepAlert != null) {
-        previewStack.add(_deepAlert!);
-      }
 
       final msgs = [
         kp.score.toStringAsFixed(3),

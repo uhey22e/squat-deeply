@@ -49,12 +49,9 @@ class KeyPoint {
   }
 }
 
-enum SquatState {
+enum SquatPosition {
   unknown,
   standing,
-  squatPartially,
-  sittingUnderParallel,
-  standingOverParallel,
   underParallel,
 }
 
@@ -130,14 +127,14 @@ class KeyPoints {
     return (hip - knee).angleTo(ankle - knee);
   }
 
-  SquatState get pose {
+  SquatPosition get pose {
     const threshold = (pi / 2);
     if ((leftKneeAngle ?? pi) < threshold) {
-      return SquatState.underParallel;
+      return SquatPosition.underParallel;
     }
     if ((rightKneeAngle ?? pi) < threshold) {
-      return SquatState.underParallel;
+      return SquatPosition.underParallel;
     }
-    return SquatState.standing;
+    return SquatPosition.standing;
   }
 }

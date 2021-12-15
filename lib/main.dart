@@ -1,7 +1,8 @@
 import 'dart:async';
+import 'dart:collection';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:squat_deeply/keypoints.dart';
 import 'package:tflite/tflite.dart';
 
 List<CameraDescription> cams = [];
@@ -41,7 +42,6 @@ class SquatCamPage extends StatefulWidget {
 
 class _SquatCamPageState extends State<SquatCamPage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  final _previewKey = GlobalKey();
 
   int _currentCam = 0;
   CameraController? _cameraController;
@@ -49,8 +49,9 @@ class _SquatCamPageState extends State<SquatCamPage> {
   bool _isModelReady = false;
   bool _playing = false;
   bool _predicting = false;
+
   KeyPoints? _keyPoints;
-  double? _frameRate;
+  double _frameRate = 0;
 
   Size? previewSize;
 
@@ -84,23 +85,30 @@ class _SquatCamPageState extends State<SquatCamPage> {
     ];
 
     if (_keyPoints != null) {
-      previewStack.addAll(
-        _keyPoints!.points.entries
-          .map((e) => Positioned(
-            left: e.value.x * width - 6,
-            top: e.value.y * height - 6,
-            child: const KeyPointIndicator(),
-          )),
-      );
-      List<String> msgs = [
-        _keyPoints!.score.toStringAsFixed(3),
-      ];
-      if (_frameRate != null) {
-        msgs.add("\n" + _frameRate!.toStringAsFixed(3) + "fps");
+      // final kp = KeyPoints.average(_rawKeyPoints.toList());
+      final kp = _keyPoints!;
+      // keypoints
+      previewStack.add(KeyPointsPreview(keyPoints: kp, width: width, height: height));
+
+      if (kp.pose == SquatState.underParallel) {
+        previewStack.add(Container(
+          width: width,
+          height: height,
+          color: Colors.amber.withOpacity(0.3),
+        ));
       }
-      previewStack.add(
-        Text(msgs.join("\n"), style: const TextStyle(color: Colors.red, fontSize: 18)),
-      );
+
+      final msgs = [
+        kp.score.toStringAsFixed(3),
+        _frameRate.toStringAsFixed(3) + "fps",
+      ];
+      previewStack.add(Container(
+        color: Colors.white.withOpacity(0.3),
+        child: Text(
+          msgs.join("\n"),
+          style: const TextStyle(color: Colors.red, fontSize: 18),
+        ),
+      ));
     }
 
     return Scaffold(
@@ -111,7 +119,23 @@ class _SquatCamPageState extends State<SquatCamPage> {
       body: Column(
         children: <Widget>[
           Stack(children: previewStack),
-          _controls(),
+          PlayControls(
+              playable: !_playing,
+              onPlay: _onPlay,
+              onStop: _onStop,
+              children: widget.cameras.length > 1
+                  ? [
+                      IconButton(
+                        icon: const Icon(Icons.flip_camera_ios),
+                        iconSize: 48,
+                        onPressed: _playing
+                            ? null
+                            : () {
+                                _choiceCamera(_currentCam ^ 1);
+                              },
+                      ),
+                    ]
+                  : []),
         ],
       ),
     );
@@ -146,7 +170,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
     }
   }
 
-  void _play() async {
+  void _onPlay() async {
     if (!_isModelReady ||
         _cameraController == null ||
         !_cameraController!.value.isInitialized) {
@@ -169,9 +193,13 @@ class _SquatCamPageState extends State<SquatCamPage> {
       _frameRate = 1000.0 / dur;
 
       if (res != null && res.isNotEmpty && res[0] != null) {
-        _keyPoints = KeyPoints.fromPoseNet(res[0]);
-      } else {
-        _keyPoints = null;
+        final kp = KeyPoints.fromPoseNet(res[0]);
+        const k = 0.6;
+        if (_keyPoints != null) {
+          _keyPoints = _keyPoints! * (1 - k) + kp * k;
+        } else {
+          _keyPoints = kp;
+        }
       }
       if (mounted) setState(() {});
     });
@@ -179,7 +207,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
     if (mounted) setState(() {});
   }
 
-  void _stop() async {
+  void _onStop() async {
     _playing = false;
     _keyPoints = null;
     if (_cameraController != null && _cameraController!.value.isInitialized) {
@@ -187,38 +215,40 @@ class _SquatCamPageState extends State<SquatCamPage> {
     }
     if (mounted) setState(() {});
   }
+}
 
-  Widget _controls() {
-    const double iconSize = 48;
-    var items = <Widget>[
-      IconButton(
-        icon: const Icon(Icons.play_arrow),
-        iconSize: iconSize,
-        onPressed: _playing ? null : _play,
-      ),
-      IconButton(
-        icon: const Icon(Icons.stop),
-        iconSize: iconSize,
-        onPressed: _playing ? _stop : null,
-      ),
-    ];
-    if (widget.cameras.length > 1) {
-      items.add(IconButton(
-        icon: const Icon(Icons.flip_camera_ios),
-        iconSize: iconSize,
-        onPressed: _playing
-            ? null
-            : () {
-                _choiceCamera(_currentCam ^ 1);
-              },
-      ));
-    }
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      mainAxisSize: MainAxisSize.max,
-      children: items,
-    );
-  }
+class PlayControls extends StatelessWidget {
+  final bool playable;
+  final VoidCallback onPlay;
+  final VoidCallback onStop;
+  final double iconSize;
+  final List<Widget> children;
+  const PlayControls({
+    Key? key,
+    required this.playable,
+    required this.onPlay,
+    required this.onStop,
+    this.iconSize = 48,
+    this.children = const [],
+  }) : super(key: key);
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        mainAxisSize: MainAxisSize.max,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.play_arrow),
+            iconSize: iconSize,
+            onPressed: playable ? onPlay : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.stop),
+            iconSize: iconSize,
+            onPressed: playable ? null : onStop,
+          ),
+          ...children,
+        ],
+      );
 }
 
 class CamView extends StatelessWidget {
@@ -259,48 +289,34 @@ class KeyPointIndicator extends StatelessWidget {
   final double size;
   final Color color;
   @override
-  Widget build(BuildContext context) {
-    return Text(
-      "●",
-      style: TextStyle(fontSize: size, color: color),
-    );
-  }
+  Widget build(BuildContext context) => Text(
+        "●",
+        style: TextStyle(fontSize: size, color: color),
+      );
 }
 
-class CognitionResult {
-  final double x;
-  final double y;
-  final String part;
-  final double score;
-  const CognitionResult(this.x, this.y, this.part, this.score);
-}
-
-class KeyPoints {
-  final Map<int, CognitionResult> points;
-
-  KeyPoints(this.points);
-  KeyPoints.fromPoseNet(dynamic cognition) : points = {} {
-    final keys = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    for (final key in keys) {
-      var v = cognition["keypoints"]?[key];
-      if (v != null) {
-        points[key] = CognitionResult(v["x"], v["y"], v["part"], v["score"]);
-      }
-    }
-  }
-
+class KeyPointsPreview extends StatelessWidget {
+  final KeyPoints keyPoints;
+  final double width;
+  final double height;
+  const KeyPointsPreview({
+    Key? key,
+    required this.keyPoints,
+    required this.width,
+    required this.height,
+  }) : super(key: key);
   @override
-  String toString() { 
-    return points.toString();
-  }
-
-  double get score {
-    if (points.isEmpty) {
-      return 0;
-    }
-    var sum = points.entries
-      .map((e) => e.value.score)
-      .reduce((value, element) => value + element);
-    return sum / points.length;
-  }
+  Widget build(BuildContext context) => SizedBox(
+    width: width,
+    height: height,
+    child: Stack(
+        children: keyPoints.points.values
+            .map((e) => Positioned(
+                  left: e.vec.x * width - 6,
+                  top: e.vec.y * height - 6,
+                  child: const KeyPointIndicator(),
+                ))
+            .toList(),
+      ),
+  );
 }

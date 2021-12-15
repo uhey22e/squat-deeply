@@ -60,7 +60,6 @@ enum SquatState {
 
 class KeyPoints {
   final Map<KeyPointPart, KeyPoint> points;
-
   const KeyPoints(this.points);
 
   KeyPoints.fromPoseNet(dynamic cognition) : points = {} {

@@ -4,6 +4,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:squat_deeply/keypoints.dart';
 import 'package:squat_deeply/predictor.dart';
+import 'package:squat_deeply/squat_counter.dart';
 import 'package:tflite/tflite.dart';
 
 List<CameraDescription> cams = [];
@@ -49,7 +50,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
   CameraController? _cameraController;
 
   bool _playing = false;
-  KeyPoints? _keyPoints;
+  SquatCounter _counter = const SquatCounter.init();
   double _frameRate = 0;
   Widget? _deepAlert;
 
@@ -82,8 +83,8 @@ class _SquatCamPageState extends State<SquatCamPage> {
       CamView(cameraController: _cameraController),
     ];
 
-    if (_keyPoints != null) {
-      final kp = _keyPoints!;
+    if (_counter.movingAverage != null) {
+      final kp = _counter.movingAverage!;
       previewStack
           .add(KeyPointsPreview(keyPoints: kp, width: width, height: height));
 
@@ -171,10 +172,11 @@ class _SquatCamPageState extends State<SquatCamPage> {
   }
 
   void _onStop() async {
-    _cameraController?.stopImageStream();
-    _playing = false;
-    _keyPoints = null;
-    if (mounted) setState(() {});
+    setState(() {
+      _cameraController?.stopImageStream();
+      _playing = false;
+      _counter = const SquatCounter.init();
+    });
   }
 
   void _onPlay() async {
@@ -189,12 +191,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
       var res = await _predictor.predict(image);
       if (res != null && res.keyPoints.score > 0.3) {
         _frameRate = 1000 / res.duration.inMilliseconds.toDouble();
-        if (_keyPoints != null) {
-          const k = 0.6;
-          _keyPoints = _keyPoints! * (1 - k) + res.keyPoints * k;
-        } else {
-          _keyPoints = res.keyPoints;
-        }
+        _counter = _counter.push(res.keyPoints);
       }
       if (mounted) setState(() {});
     });

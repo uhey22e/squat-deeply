@@ -4,13 +4,11 @@ import 'package:squat_deeply/keypoints.dart';
 
 enum SquatState {
   unknown,
-  sittingToParallel,
-  sittingToBottom,
-  standingToParallel,
+  sitting,
   standing,
 }
 
-const _bufferSize = 10;
+const _bufferSize = 20;
 
 class SquatCounter {
   final int count;
@@ -24,34 +22,52 @@ class SquatCounter {
   SquatCounter push(KeyPoints keypoints) {
     const k = 0.6;
     final avg =
-       history.isEmpty ? keypoints : history.last * (1 - k) + keypoints * k;
-    final next = SquatCounter(
-      count,
-      [...history.sublist(max(0, history.length - _bufferSize)), avg],
-    );
+        history.isEmpty ? keypoints : history.last * (1 - k) + keypoints * k;
+    final hist = <KeyPoints>[
+      ...history.sublist(max(0, history.length - _bufferSize)),
+      avg
+    ];
+    final next = SquatCounter(count, hist);
     return next;
   }
 
   KeyPoints? get last => history.isEmpty ? null : history.last;
   SquatState get state {
-    if (history.length < 2) {
+    if (history.length != _bufferSize) {
       return SquatState.unknown;
     }
-    final last = history.last.leftKneeAngle ?? 0;
-    final prev = history[history.length - 2].leftKneeAngle ?? 0;
-    if (last > prev) {
-      if (last < pi / 2) {
-        return SquatState.standingToParallel;
-      } else {
-        return SquatState.standing;
-      }
-    } else {
-      if (last < pi / 2) {
-        return SquatState.sittingToBottom;
-      } else {
-        return SquatState.sittingToBottom;
-      }
+    final cur = history.last.leftKneeAngle;
+    final cmp = history.first.leftKneeAngle;
+    if (cur != null || cmp != null) {
+      return SquatState.unknown;
     }
+    final v = cur! - cmp!;
+    const threshold = 0.1;
+    if (v > threshold) {
+      return SquatState.standing;
+    } else if (v < -threshold) {
+      return SquatState.sitting;
+    }
+    return SquatState.unknown;
   }
-  SquatState get prevState => SquatState.sittingToParallel;
+
+  bool get switching {
+    // 切り返し検出
+    if (history.length != _bufferSize) {
+      return false;
+    }
+    const threshold = 0.01;
+    return ((angle ?? 0) - (bottom ?? pi)) > threshold;
+  }
+
+  double? get angle {
+    if (history.isEmpty) return 0;
+    return history.last.leftKneeAngle ?? 0;
+  }
+
+  double? get bottom {
+    if (history.isEmpty) return pi;
+    final bottom = history.map((e) => e.leftKneeAngle ?? pi).reduce(min);
+    return bottom;
+  }
 }

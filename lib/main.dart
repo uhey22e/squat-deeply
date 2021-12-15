@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:collection';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:squat_deeply/keypoints.dart';
 import 'package:squat_deeply/predictor.dart';
 import 'package:squat_deeply/squat_counter.dart';
-import 'package:tflite/tflite.dart';
 
 List<CameraDescription> cams = [];
 
@@ -73,6 +71,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
 
   @override
   Widget build(BuildContext context) {
+    print(_counter.bottom);
     final sz = MediaQuery.of(context).size;
     final width = sz.width;
     final height = _cameraController != null
@@ -83,28 +82,39 @@ class _SquatCamPageState extends State<SquatCamPage> {
       CamView(cameraController: _cameraController),
     ];
 
-    if (_shallowAlert == null &&
-        _counter.state == SquatState.standing &&
-        _counter.prevState == SquatState.sittingToParallel) {
-      _shallowAlert = Container(
-        width: width,
-        height: height,
-        alignment: Alignment.center,
-        child: const Text("浅い!!",
+    if (_counter.switching) {
+      previewStack.add(
+        const Text("Switch!!",
             style: TextStyle(
                 color: Colors.redAccent,
                 fontSize: 100,
                 fontWeight: FontWeight.w800)),
       );
-      Timer(const Duration(seconds: 1), () {
-        setState(() {
-          _shallowAlert = null;
-        });
-      });
     }
-    if (_shallowAlert != null) {
-      previewStack.add(_shallowAlert!);
-    }
+
+
+    // if (_shallowAlert == null &&
+    //     _counter.state == SquatState.standing &&
+    //     _counter.prevState == SquatState.sittingToParallel) {
+    //   _shallowAlert = Container(
+    //     width: width,
+    //     height: height,
+    //     alignment: Alignment.center,
+    //     child: const Text("浅い!!",
+    //         style: TextStyle(
+    //             color: Colors.redAccent,
+    //             fontSize: 100,
+    //             fontWeight: FontWeight.w800)),
+    //   );
+    //   Timer(const Duration(seconds: 1), () {
+    //     setState(() {
+    //       _shallowAlert = null;
+    //     });
+    //   });
+    // }
+    // if (_shallowAlert != null) {
+    //   previewStack.add(_shallowAlert!);
+    // }
 
     if (_counter.last != null) {
       final kp = _counter.last!;
@@ -113,6 +123,8 @@ class _SquatCamPageState extends State<SquatCamPage> {
 
       final msgs = [
         kp.score.toStringAsFixed(3),
+        "angle: ${(_counter.angle ?? 0) * 180 / 3.1416}",
+        "bottom: ${(_counter.bottom ?? 3.1416) * 180 / 3.1416}",
         _frameRate.toStringAsFixed(3) + " fps",
       ];
       previewStack.add(Container(

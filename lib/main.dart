@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:squat_deeply/keypoints.dart';
+import 'package:squat_deeply/predictor.dart';
 import 'package:tflite/tflite.dart';
 
 List<CameraDescription> cams = [];
@@ -42,23 +43,19 @@ class SquatCamPage extends StatefulWidget {
 
 class _SquatCamPageState extends State<SquatCamPage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final Predictor _predictor = Predictor();
 
   int _currentCam = 0;
   CameraController? _cameraController;
 
-  bool _isModelReady = false;
   bool _playing = false;
-  bool _predicting = false;
-
   KeyPoints? _keyPoints;
   double _frameRate = 0;
-
-  Size? previewSize;
 
   @override
   void initState() {
     super.initState();
-    _loadModel();
+    _predictor.init();
     if (widget.cameras.isNotEmpty) {
       _choiceCamera(0);
     }
@@ -80,7 +77,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
         ? width * _cameraController!.value.aspectRatio
         : width * (5 / 4);
 
-    List<Widget> previewStack = [
+    final previewStack = <Widget>[
       CamView(cameraController: _cameraController),
     ];
 
@@ -88,7 +85,8 @@ class _SquatCamPageState extends State<SquatCamPage> {
       // final kp = KeyPoints.average(_rawKeyPoints.toList());
       final kp = _keyPoints!;
       // keypoints
-      previewStack.add(KeyPointsPreview(keyPoints: kp, width: width, height: height));
+      previewStack
+          .add(KeyPointsPreview(keyPoints: kp, width: width, height: height));
 
       if (kp.pose == SquatState.underParallel) {
         previewStack.add(Container(
@@ -100,7 +98,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
 
       final msgs = [
         kp.score.toStringAsFixed(3),
-        _frameRate.toStringAsFixed(3) + "fps",
+        _frameRate.toStringAsFixed(3) + " fps",
       ];
       previewStack.add(Container(
         color: Colors.white.withOpacity(0.3),
@@ -141,16 +139,6 @@ class _SquatCamPageState extends State<SquatCamPage> {
     );
   }
 
-  void _loadModel() async {
-    print("loading model");
-    await Tflite.loadModel(
-      model: "assets/posenet_mv1_075_float_from_checkpoints.tflite",
-      useGpuDelegate: true,
-    );
-    _isModelReady = true;
-    if (mounted) setState(() {});
-  }
-
   void _choiceCamera(int i) async {
     await _cameraController?.dispose();
     final cam = widget.cameras[i];
@@ -170,50 +158,34 @@ class _SquatCamPageState extends State<SquatCamPage> {
     }
   }
 
+  void _onStop() async {
+    _cameraController?.stopImageStream();
+    _playing = false;
+    _keyPoints = null;
+    if (mounted) setState(() {});
+  }
+
   void _onPlay() async {
-    if (!_isModelReady ||
-        _cameraController == null ||
-        !_cameraController!.value.isInitialized) {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
       return;
     }
-    _playing = true;
-
+    setState(() {
+      _playing = true;
+    });
     await _cameraController!.startImageStream((image) async {
-      if (_predicting) return;
-      _predicting = true;
-      final ts = DateTime.now().millisecondsSinceEpoch;
-      var res = await Tflite.runPoseNetOnFrame(
-        bytesList: image.planes.map((plane) => plane.bytes).toList(),
-        imageHeight: image.height,
-        imageWidth: image.width,
-        numResults: 2,
-      );
-      _predicting = false;
-      final dur = DateTime.now().millisecondsSinceEpoch - ts;
-      _frameRate = 1000.0 / dur;
-
-      if (res != null && res.isNotEmpty && res[0] != null) {
-        final kp = KeyPoints.fromPoseNet(res[0]);
-        const k = 0.6;
+      if (!_predictor.ready) return;
+      var res = await _predictor.predict(image);
+      if (res != null && res.keyPoints.score > 0.3) {
+        _frameRate = 1000 / res.duration.inMilliseconds.toDouble();
         if (_keyPoints != null) {
-          _keyPoints = _keyPoints! * (1 - k) + kp * k;
+          const k = 0.6;
+          _keyPoints = _keyPoints! * (1 - k) + res.keyPoints * k;
         } else {
-          _keyPoints = kp;
+          _keyPoints = res.keyPoints;
         }
       }
       if (mounted) setState(() {});
     });
-
-    if (mounted) setState(() {});
-  }
-
-  void _onStop() async {
-    _playing = false;
-    _keyPoints = null;
-    if (_cameraController != null && _cameraController!.value.isInitialized) {
-      await _cameraController!.stopImageStream();
-    }
-    if (mounted) setState(() {});
   }
 }
 
@@ -307,16 +279,16 @@ class KeyPointsPreview extends StatelessWidget {
   }) : super(key: key);
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: width,
-    height: height,
-    child: Stack(
-        children: keyPoints.points.values
-            .map((e) => Positioned(
-                  left: e.vec.x * width - 6,
-                  top: e.vec.y * height - 6,
-                  child: const KeyPointIndicator(),
-                ))
-            .toList(),
-      ),
-  );
+        width: width,
+        height: height,
+        child: Stack(
+          children: keyPoints.points.values
+              .map((e) => Positioned(
+                    left: e.vec.x * width - 6,
+                    top: e.vec.y * height - 6,
+                    child: const KeyPointIndicator(),
+                  ))
+              .toList(),
+        ),
+      );
 }

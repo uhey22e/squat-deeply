@@ -8,16 +8,18 @@ enum SquatState {
   standing,
 }
 
-const _bufferSize = 20;
+const _bufferSize = 30;
 
 class SquatCounter {
   final int count;
   final List<KeyPoints> history;
+  final List<double> hipSpeeds;
 
-  const SquatCounter(this.count, this.history);
+  const SquatCounter(this.count, this.history, this.hipSpeeds);
   const SquatCounter.init()
       : count = 0,
-        history = const [];
+        history = const [],
+        hipSpeeds = const [];
 
   SquatCounter push(KeyPoints keypoints) {
     const k = 0.6;
@@ -27,47 +29,32 @@ class SquatCounter {
       ...history.sublist(max(0, history.length - _bufferSize)),
       avg
     ];
-    final next = SquatCounter(count, hist);
-    return next;
+
+    final hipSpeeds = List<double>.generate(max(0, hist.length - 2), (i) {
+      final base = hist[i + 2].points[KeyPointPart.leftHip];
+      final cmp = hist[i].points[KeyPointPart.leftHip];
+      if (base != null && cmp != null) {
+        return base.vec.y - cmp.vec.y;
+      }
+      return 0;
+    });
+
+    return SquatCounter(count, hist, hipSpeeds);
   }
 
   KeyPoints? get last => history.isEmpty ? null : history.last;
-  SquatState get state {
-    if (history.length != _bufferSize) {
-      return SquatState.unknown;
+
+  bool get isUnderParallel {
+    if (history.isNotEmpty && history.last.leftKneeAngle != null) {
+      return history.last.leftKneeAngle! < (10 * pi / 18);
     }
-    final cur = history.last.leftKneeAngle;
-    final cmp = history.first.leftKneeAngle;
-    if (cur != null || cmp != null) {
-      return SquatState.unknown;
-    }
-    final v = cur! - cmp!;
-    const threshold = 0.1;
-    if (v > threshold) {
-      return SquatState.standing;
-    } else if (v < -threshold) {
-      return SquatState.sitting;
-    }
-    return SquatState.unknown;
+    return false;
   }
 
-  bool get switching {
-    // 切り返し検出
-    if (history.length != _bufferSize) {
-      return false;
+  bool get isStanding {
+    if (hipSpeeds.isNotEmpty) {
+      return hipSpeeds.last < -0.015;
     }
-    const threshold = 0.01;
-    return ((angle ?? 0) - (bottom ?? pi)) > threshold;
-  }
-
-  double? get angle {
-    if (history.isEmpty) return 0;
-    return history.last.leftKneeAngle ?? 0;
-  }
-
-  double? get bottom {
-    if (history.isEmpty) return pi;
-    final bottom = history.map((e) => e.leftKneeAngle ?? pi).reduce(min);
-    return bottom;
+    return false;
   }
 }

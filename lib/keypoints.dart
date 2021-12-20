@@ -39,13 +39,10 @@ class KeyPoint {
   const KeyPoint(this.part, this.vec, this.score);
 
   operator +(KeyPoint other) {
-    return KeyPoint(part, vec + other.vec, (score + other.score) / 2);
+    return KeyPoint(part, vec + other.vec, score + other.score);
   }
   operator *(double other) {
-    return KeyPoint(part, vec * other, score);
-  }
-  operator /(double other) {
-    return KeyPoint(part, vec / other, score);
+    return KeyPoint(part, vec * other, score * other);
   }
 }
 
@@ -68,12 +65,12 @@ class KeyPoints {
     });
   }
 
-  operator +(KeyPoints left) {
+  operator +(KeyPoints other) {
     var p = <KeyPointPart, KeyPoint>{};
     for (final part in KeyPointPart.values) {
       final zero = KeyPoint(part, Vector2(0, 0), 0);
       final l = points[part];
-      final r = left.points[part];
+      final r = other.points[part];
       if (l != null || r != null) {
         p[part] = (l ?? zero) + (r ?? zero);
       }

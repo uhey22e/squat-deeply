@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:squat_deeply/keypoints.dart';
@@ -33,6 +34,7 @@ class CameraApp extends StatelessWidget {
 class SquatCamPage extends StatefulWidget {
   final String title;
   final List<CameraDescription> cameras;
+  final bool _showChart = false;
   const SquatCamPage({Key? key, required this.title, required this.cameras})
       : super(key: key);
 
@@ -41,16 +43,16 @@ class SquatCamPage extends StatefulWidget {
 }
 
 class _SquatCamPageState extends State<SquatCamPage> {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final Predictor _predictor = Predictor();
 
   int _currentCam = 0;
   CameraController? _cameraController;
 
-  bool _playing = false;
   SquatCounter _counter = const SquatCounter.init();
+  bool _playing = false;
   double _frameRate = 0;
-  Widget? _shallowAlert;
+  bool _cntMutex = false;
+  Widget _shallowAlert = Container();
 
   @override
   void initState() {
@@ -71,50 +73,45 @@ class _SquatCamPageState extends State<SquatCamPage> {
 
   @override
   Widget build(BuildContext context) {
-    print(_counter.bottom);
     final sz = MediaQuery.of(context).size;
     final width = sz.width;
     final height = _cameraController != null
         ? width * _cameraController!.value.aspectRatio
         : width * (5 / 4);
 
-    final previewStack = <Widget>[
-      CamView(cameraController: _cameraController),
-    ];
-
-    if (_counter.switching) {
-      previewStack.add(
-        const Text("Switch!!",
-            style: TextStyle(
-                color: Colors.redAccent,
-                fontSize: 100,
-                fontWeight: FontWeight.w800)),
+    if (!_cntMutex && _counter.isStanding) {
+      _cntMutex = true;
+      var msg = _counter.isUnderParallel ? "Deep" : "Shallow";
+      _shallowAlert = Container(
+        alignment: Alignment.center,
+        height: height,
+        child: Text(msg,
+            style: const TextStyle(color: Colors.redAccent, fontSize: 48)),
       );
+      Timer(const Duration(seconds: 2), () {
+        setState(() {
+          _cntMutex = false;
+          _shallowAlert = Container();
+        });
+      });
+      setState(() {});
     }
 
+    final previewStack = <Widget>[
+      CamView(
+        cameraController: _cameraController,
+      ),
+      _shallowAlert,
+    ];
 
-    // if (_shallowAlert == null &&
-    //     _counter.state == SquatState.standing &&
-    //     _counter.prevState == SquatState.sittingToParallel) {
-    //   _shallowAlert = Container(
-    //     width: width,
-    //     height: height,
-    //     alignment: Alignment.center,
-    //     child: const Text("浅い!!",
-    //         style: TextStyle(
-    //             color: Colors.redAccent,
-    //             fontSize: 100,
-    //             fontWeight: FontWeight.w800)),
-    //   );
-    //   Timer(const Duration(seconds: 1), () {
-    //     setState(() {
-    //       _shallowAlert = null;
-    //     });
-    //   });
-    // }
-    // if (_shallowAlert != null) {
-    //   previewStack.add(_shallowAlert!);
-    // }
+    if (widget._showChart) {
+      previewStack.add(Container(
+        width: width,
+        height: height,
+        alignment: Alignment.centerLeft,
+        child: AngleChart(_counter),
+      ));
+    }
 
     if (_counter.last != null) {
       final kp = _counter.last!;
@@ -123,8 +120,6 @@ class _SquatCamPageState extends State<SquatCamPage> {
 
       final msgs = [
         kp.score.toStringAsFixed(3),
-        "angle: ${(_counter.angle ?? 0) * 180 / 3.1416}",
-        "bottom: ${(_counter.bottom ?? 3.1416) * 180 / 3.1416}",
         _frameRate.toStringAsFixed(3) + " fps",
       ];
       previewStack.add(Container(
@@ -137,7 +132,6 @@ class _SquatCamPageState extends State<SquatCamPage> {
     }
 
     return Scaffold(
-      key: _scaffoldKey,
       appBar: AppBar(
         title: Text(widget.title),
       ),
@@ -152,7 +146,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
                   ? [
                       IconButton(
                         icon: const Icon(Icons.flip_camera_ios),
-                        iconSize: 48,
+                        iconSize: 32,
                         onPressed: _playing
                             ? null
                             : () {
@@ -189,7 +183,6 @@ class _SquatCamPageState extends State<SquatCamPage> {
     setState(() {
       _cameraController?.stopImageStream();
       _playing = false;
-      _counter = const SquatCounter.init();
     });
   }
 
@@ -199,6 +192,9 @@ class _SquatCamPageState extends State<SquatCamPage> {
     }
     setState(() {
       _playing = true;
+      _cntMutex = false;
+      _shallowAlert = Container();
+      _counter = const SquatCounter.init();
     });
     await _cameraController!.startImageStream((image) async {
       if (!_predictor.ready) return;
@@ -223,7 +219,7 @@ class PlayControls extends StatelessWidget {
     required this.playable,
     required this.onPlay,
     required this.onStop,
-    this.iconSize = 48,
+    this.iconSize = 32,
     this.children = const [],
   }) : super(key: key);
   @override
@@ -247,30 +243,33 @@ class PlayControls extends StatelessWidget {
 }
 
 class CamView extends StatelessWidget {
-  const CamView({Key? key, this.cameraController}) : super(key: key);
+  const CamView({
+    Key? key,
+    required this.cameraController,
+  }) : super(key: key);
   final CameraController? cameraController;
   @override
   Widget build(BuildContext context) {
-    if (cameraController == null) {
+    if (cameraController != null) {
       return AspectRatio(
-        aspectRatio: 4 / 5,
-        child: Container(
-          alignment: Alignment.center,
-          color: Colors.black,
-          child: const Text(
-            'No cams available',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 24.0,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
+        aspectRatio: 1 / cameraController!.value.aspectRatio,
+        child: CameraPreview(cameraController!),
       );
     }
     return AspectRatio(
-      aspectRatio: 1 / cameraController!.value.aspectRatio,
-      child: CameraPreview(cameraController!),
+      aspectRatio: 5 / 4,
+      child: Container(
+        alignment: Alignment.center,
+        color: Colors.black,
+        child: const Text(
+          'No cams available',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 24.0,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -314,4 +313,46 @@ class KeyPointsPreview extends StatelessWidget {
               .toList(),
         ),
       );
+}
+
+class AngleChart extends StatelessWidget {
+  final SquatCounter counter;
+  const AngleChart(
+    this.counter, {
+    Key? key,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+        painter: _AngleChartPainter(counter),
+      );
+}
+
+class _AngleChartPainter extends CustomPainter {
+  final SquatCounter counter;
+  const _AngleChartPainter(this.counter);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final main = Paint()..color = Colors.blue;
+    main.strokeWidth = 5;
+    final sub1 = Paint()..color = Colors.green;
+    canvas.drawLine(const Offset(0, 0), const Offset(300, 0), main);
+
+    counter.history.asMap().forEach((i, v) {
+      if (v.leftKneeAngle != null) {
+        final x = 10 + 5 * i;
+        final y = 30 * (v.leftKneeAngle! - (11 / 18) * pi);
+        canvas.drawCircle(Offset(x.toDouble(), y), 3, main);
+      }
+    });
+
+    counter.hipSpeeds.asMap().forEach((i, v) {
+      final x = 10 + 5 * i;
+      final y = 2000 * v;
+      canvas.drawCircle(Offset(x.toDouble(), y), 3, sub1);
+    });
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

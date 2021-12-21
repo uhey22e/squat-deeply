@@ -17,7 +17,7 @@ enum KeyPointPart {
   rightAnkle,
 }
 
-const keyPointPartNumbers = {
+const _poseNetIndices = {
   5: KeyPointPart.leftShoulder,
   6: KeyPointPart.rightShoulder,
   7: KeyPointPart.leftElbow,
@@ -37,77 +37,43 @@ class KeyPoint {
   final Vector2 vec;
   final double score;
   const KeyPoint(this.part, this.vec, this.score);
-
-  operator +(KeyPoint other) {
-    return KeyPoint(part, vec + other.vec, score + other.score);
-  }
-  operator *(double other) {
-    return KeyPoint(part, vec * other, score * other);
-  }
-}
-
-enum SquatPosition {
-  unknown,
-  standing,
-  underParallel,
 }
 
 class KeyPoints {
-  final Map<KeyPointPart, KeyPoint> points;
-  const KeyPoints(this.points);
+  final Map<KeyPointPart, KeyPoint> _points;
 
-  KeyPoints.fromPoseNet(dynamic cognition) : points = {} {
-    keyPointPartNumbers.forEach((key, part) {
+  KeyPoints.fromPoseNet(dynamic cognition) : _points = {} {
+    _poseNetIndices.forEach((key, part) {
       var v = cognition["keypoints"]?[key];
       if (v != null) {
-        points[part] = KeyPoint(part, Vector2(v["x"], v["y"]), v["score"]);
+        _points[part] = KeyPoint(part, Vector2(v["x"], v["y"]), v["score"]);
       }
     });
   }
 
-  operator +(KeyPoints other) {
-    var p = <KeyPointPart, KeyPoint>{};
-    for (final part in KeyPointPart.values) {
-      final zero = KeyPoint(part, Vector2(0, 0), 0);
-      final l = points[part];
-      final r = other.points[part];
-      if (l != null || r != null) {
-        p[part] = (l ?? zero) + (r ?? zero);
-      }
-    }
-    return KeyPoints(p);
-  }
-
-  operator *(double other) {
-    var p = <KeyPointPart, KeyPoint>{};
-    for (final part in KeyPointPart.values) {
-      final v = points[part];
-      if (v != null) {
-        p[part] = v * other;
-      }
-    }
-    return KeyPoints(p);
-  }
-
   @override
   String toString() {
-    return points.toString();
+    return _points.toString();
   }
+
+  List<KeyPoint> get points => _points.values.toList();
 
   double get score {
-    if (points.isEmpty) {
+    if (_points.isEmpty) {
       return 0;
     }
-    var sum = points.entries
+    var sum = _points.entries
         .map((e) => e.value.score)
         .reduce((value, element) => value + element);
-    return sum / points.length;
+    return sum / _points.length;
   }
 
+  Vector2? get leftHip => _points[KeyPointPart.leftHip]?.vec;
+
   double? get leftKneeAngle {
-    final hip = points[KeyPointPart.leftHip]?.vec;
-    final knee = points[KeyPointPart.leftKnee]?.vec;
-    final ankle = points[KeyPointPart.leftAnkle]?.vec;
+    final hip = _points[KeyPointPart.leftHip]?.vec;
+    final knee = _points[KeyPointPart.leftKnee]?.vec;
+    final ankle = _points[KeyPointPart.leftAnkle]?.vec;
     if (hip == null || knee == null || ankle == null) {
       return null;
     }
@@ -115,23 +81,86 @@ class KeyPoints {
   }
 
   double? get rightKneeAngle {
-    final hip = points[KeyPointPart.rightHip]?.vec;
-    final knee = points[KeyPointPart.rightKnee]?.vec;
-    final ankle = points[KeyPointPart.rightAnkle]?.vec;
+    final hip = _points[KeyPointPart.rightHip]?.vec;
+    final knee = _points[KeyPointPart.rightKnee]?.vec;
+    final ankle = _points[KeyPointPart.rightAnkle]?.vec;
     if (hip == null || knee == null || ankle == null) {
       return null;
     }
     return (hip - knee).angleTo(ankle - knee);
   }
+}
 
-  SquatPosition get pose {
-    const threshold = (pi / 2);
-    if ((leftKneeAngle ?? pi) < threshold) {
-      return SquatPosition.underParallel;
+const _bufferSize = 30;
+
+class KeyPointsSeries {
+  final List<DateTime> timestamps;
+  final List<KeyPoints> keyPoints;
+  final List<double> kneeAngles;
+
+  const KeyPointsSeries(this.timestamps, this.keyPoints, this.kneeAngles);
+
+  const KeyPointsSeries.init()
+      : timestamps = const [],
+        keyPoints = const [],
+        kneeAngles = const [];
+
+  KeyPointsSeries push(DateTime timestamp, KeyPoints kp) {
+    if (kp.leftHip == null || kp.leftKneeAngle == null) {
+      return this;
     }
-    if ((rightKneeAngle ?? pi) < threshold) {
-      return SquatPosition.underParallel;
+
+    final timestamps = [timestamp, ...this.timestamps];
+    final keyPoints = [kp, ...this.keyPoints];
+    if (keyPoints.length == 1) {
+      return KeyPointsSeries(timestamps, keyPoints, [kp.leftKneeAngle!]);
     }
-    return SquatPosition.standing;
+
+    const k = 0.7;
+    final kneeAngles = [
+      this.kneeAngles.first * (1 - k) + kp.leftKneeAngle! * k,
+      ...this.kneeAngles,
+    ];
+    return KeyPointsSeries(
+      timestamps.length > _bufferSize
+          ? timestamps.sublist(0, _bufferSize - 1)
+          : timestamps,
+      keyPoints.length > _bufferSize
+          ? keyPoints.sublist(0, _bufferSize - 1)
+          : keyPoints,
+      kneeAngles.length > _bufferSize
+          ? kneeAngles.sublist(0, _bufferSize - 1)
+          : kneeAngles,
+    );
+  }
+
+  double get kneeAngleSpeed {
+    // radian / sec
+    if (kneeAngles.length < 2) {
+      return 0;
+    }
+    final dt = timestamps[0].difference(timestamps[1]);
+    return (kneeAngles[0] - kneeAngles[1]) /
+        (dt.inMicroseconds.toDouble() / 1000000);
+  }
+
+  List<double> get kneeAngleSpeeds {
+    // radian / sec
+    if (kneeAngles.length < 2) {
+      return [];
+    }
+    return List<double>.generate(kneeAngles.length - 1, (i) {
+      final dt = timestamps[i].difference(timestamps[i + 1]);
+      return (kneeAngles[i] - kneeAngles[i + 1]) /
+          (dt.inMicroseconds.toDouble() / 1000000);
+    });
+  }
+
+  bool get isStanding {
+    return kneeAngleSpeed > 2.0;
+  }
+
+  bool get isUnderParallel {
+    return kneeAngles.first < (pi * 10 / 18);
   }
 }

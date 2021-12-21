@@ -1,10 +1,9 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:camera/camera.dart';
+import 'package:charts_flutter/flutter.dart' as charts;
 import 'package:flutter/material.dart';
 import 'package:squat_deeply/keypoints.dart';
 import 'package:squat_deeply/predictor.dart';
-import 'package:squat_deeply/squat_counter.dart';
 
 List<CameraDescription> cams = [];
 
@@ -34,7 +33,7 @@ class CameraApp extends StatelessWidget {
 class SquatCamPage extends StatefulWidget {
   final String title;
   final List<CameraDescription> cameras;
-  final bool _showChart = false;
+  final bool _showDebugMsg = true;
   const SquatCamPage({Key? key, required this.title, required this.cameras})
       : super(key: key);
 
@@ -44,13 +43,15 @@ class SquatCamPage extends StatefulWidget {
 
 class _SquatCamPageState extends State<SquatCamPage> {
   final Predictor _predictor = Predictor();
+  int _count = 0;
+  KeyPointsSeries _keyPoints = const KeyPointsSeries.init();
 
   int _currentCam = 0;
   CameraController? _cameraController;
 
-  SquatCounter _counter = const SquatCounter.init();
   bool _playing = false;
   double _frameRate = 0;
+
   bool _cntMutex = false;
   Widget _shallowAlert = Container();
 
@@ -79,57 +80,39 @@ class _SquatCamPageState extends State<SquatCamPage> {
         ? width * _cameraController!.value.aspectRatio
         : width * (5 / 4);
 
-    if (!_cntMutex && _counter.isStanding) {
-      _cntMutex = true;
-      var msg = _counter.isUnderParallel ? "Deep" : "Shallow";
-      _shallowAlert = Container(
-        alignment: Alignment.center,
-        height: height,
-        child: Text(msg,
-            style: const TextStyle(color: Colors.redAccent, fontSize: 48)),
-      );
-      Timer(const Duration(seconds: 2), () {
-        setState(() {
-          _cntMutex = false;
-          _shallowAlert = Container();
-        });
-      });
-      setState(() {});
-    }
-
     final previewStack = <Widget>[
-      CamView(
-        cameraController: _cameraController,
-      ),
-      _shallowAlert,
+      _CamView(cameraController: _cameraController),
     ];
 
-    if (widget._showChart) {
-      previewStack.add(Container(
-        width: width,
-        height: height,
-        alignment: Alignment.centerLeft,
-        child: AngleChart(_counter),
-      ));
+    if (_keyPoints.keyPoints.isNotEmpty) {
+      previewStack.add(
+        _KeyPointsPreview(
+            keyPoints: _keyPoints.keyPoints.first,
+            width: width,
+            height: height),
+      );
+
+      if (widget._showDebugMsg) {
+        final msgs = [
+          _keyPoints.keyPoints.first.score.toStringAsFixed(3),
+          _frameRate.toStringAsFixed(3) + " fps",
+          _keyPoints.kneeAngleSpeed.toStringAsFixed(3),
+        ];
+        previewStack.add(Container(
+          color: Colors.white.withOpacity(0.3),
+          child: Text(
+            msgs.join("\n"),
+            style: const TextStyle(color: Colors.red, fontSize: 18),
+          ),
+        ));
+      }
     }
 
-    if (_counter.last != null) {
-      final kp = _counter.last!;
-      previewStack
-          .add(KeyPointsPreview(keyPoints: kp, width: width, height: height));
-
-      final msgs = [
-        kp.score.toStringAsFixed(3),
-        _frameRate.toStringAsFixed(3) + " fps",
-      ];
-      previewStack.add(Container(
-        color: Colors.white.withOpacity(0.3),
-        child: Text(
-          msgs.join("\n"),
-          style: const TextStyle(color: Colors.red, fontSize: 18),
-        ),
-      ));
-    }
+    previewStack.add(Container(
+      alignment: Alignment.center,
+      height: height,
+      child: _shallowAlert,
+    ));
 
     return Scaffold(
       appBar: AppBar(
@@ -138,7 +121,7 @@ class _SquatCamPageState extends State<SquatCamPage> {
       body: Column(
         children: <Widget>[
           Stack(children: previewStack),
-          PlayControls(
+          _PlayControls(
               playable: !_playing,
               onPlay: _onPlay,
               onStop: _onStop,
@@ -194,27 +177,44 @@ class _SquatCamPageState extends State<SquatCamPage> {
       _playing = true;
       _cntMutex = false;
       _shallowAlert = Container();
-      _counter = const SquatCounter.init();
+      _keyPoints = const KeyPointsSeries.init();
     });
     await _cameraController!.startImageStream((image) async {
       if (!_predictor.ready) return;
       var res = await _predictor.predict(image);
-      if (res != null && res.keyPoints.score > 0.3) {
+      if (res != null && res.keyPoints.score > 0.5) {
         _frameRate = 1000 / res.duration.inMilliseconds.toDouble();
-        _counter = _counter.push(res.keyPoints);
+        _keyPoints = _keyPoints.push(res.timestamp, res.keyPoints);
+
+        if (!_cntMutex && _keyPoints.isStanding) {
+          _cntMutex = true;
+          var msg = "浅い!!!";
+          if (_keyPoints.isUnderParallel) {
+            _count += 1;
+            msg = _count.toString();
+          }
+          _shallowAlert = Text(msg,
+              style: const TextStyle(color: Colors.redAccent, fontSize: 90, fontWeight: FontWeight.w800));
+          Timer(const Duration(seconds: 2), () {
+            setState(() {
+              _cntMutex = false;
+              _shallowAlert = Container();
+            });
+          });
+        }
       }
       if (mounted) setState(() {});
     });
   }
 }
 
-class PlayControls extends StatelessWidget {
+class _PlayControls extends StatelessWidget {
   final bool playable;
   final VoidCallback onPlay;
   final VoidCallback onStop;
   final double iconSize;
   final List<Widget> children;
-  const PlayControls({
+  const _PlayControls({
     Key? key,
     required this.playable,
     required this.onPlay,
@@ -242,8 +242,8 @@ class PlayControls extends StatelessWidget {
       );
 }
 
-class CamView extends StatelessWidget {
-  const CamView({
+class _CamView extends StatelessWidget {
+  const _CamView({
     Key? key,
     required this.cameraController,
   }) : super(key: key);
@@ -274,11 +274,11 @@ class CamView extends StatelessWidget {
   }
 }
 
-class KeyPointIndicator extends StatelessWidget {
-  const KeyPointIndicator({
+class _KeyPointIndicator extends StatelessWidget {
+  const _KeyPointIndicator({
     Key? key,
     this.size = 12,
-    this.color = Colors.redAccent,
+    this.color = Colors.amberAccent,
   }) : super(key: key);
   final double size;
   final Color color;
@@ -289,11 +289,11 @@ class KeyPointIndicator extends StatelessWidget {
       );
 }
 
-class KeyPointsPreview extends StatelessWidget {
+class _KeyPointsPreview extends StatelessWidget {
   final KeyPoints keyPoints;
   final double width;
   final double height;
-  const KeyPointsPreview({
+  const _KeyPointsPreview({
     Key? key,
     required this.keyPoints,
     required this.width,
@@ -304,55 +304,36 @@ class KeyPointsPreview extends StatelessWidget {
         width: width,
         height: height,
         child: Stack(
-          children: keyPoints.points.values
+          children: keyPoints.points
               .map((e) => Positioned(
                     left: e.vec.x * width - 6,
                     top: e.vec.y * height - 6,
-                    child: const KeyPointIndicator(),
+                    child: const _KeyPointIndicator(),
                   ))
               .toList(),
         ),
       );
 }
 
-class AngleChart extends StatelessWidget {
-  final SquatCounter counter;
-  const AngleChart(
-    this.counter, {
-    Key? key,
-  }) : super(key: key);
+class _SquatChart extends StatelessWidget {
+  final KeyPointsSeries data;
+  const _SquatChart(this.data, {Key? key}) : super(key: key);
 
   @override
-  Widget build(BuildContext context) => CustomPaint(
-        painter: _AngleChartPainter(counter),
-      );
-}
-
-class _AngleChartPainter extends CustomPainter {
-  final SquatCounter counter;
-  const _AngleChartPainter(this.counter);
-  @override
-  void paint(Canvas canvas, Size size) {
-    final main = Paint()..color = Colors.blue;
-    main.strokeWidth = 5;
-    final sub1 = Paint()..color = Colors.green;
-    canvas.drawLine(const Offset(0, 0), const Offset(300, 0), main);
-
-    counter.history.asMap().forEach((i, v) {
-      if (v.leftKneeAngle != null) {
-        final x = 10 + 5 * i;
-        final y = 30 * (v.leftKneeAngle! - (11 / 18) * pi);
-        canvas.drawCircle(Offset(x.toDouble(), y), 3, main);
-      }
-    });
-
-    counter.hipSpeeds.asMap().forEach((i, v) {
-      final x = 10 + 5 * i;
-      final y = 2000 * v;
-      canvas.drawCircle(Offset(x.toDouble(), y), 3, sub1);
-    });
+  Widget build(BuildContext context) {
+    return charts.TimeSeriesChart([
+      charts.Series<double, DateTime>(
+        id: 'KneeAngle',
+        data: data.kneeAngles,
+        domainFn: (_, i) => data.timestamps[i!],
+        measureFn: (d, _) => d,
+      ),
+      charts.Series<double, DateTime>(
+        id: 'KneeAngleSpeed',
+        data: data.kneeAngleSpeeds,
+        domainFn: (_, i) => data.timestamps[i!],
+        measureFn: (d, _) => d,
+      ),
+    ]);
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

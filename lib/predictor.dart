@@ -2,6 +2,13 @@ import 'package:camera/camera.dart';
 import 'package:squat_deeply/keypoints.dart';
 import 'package:tflite/tflite.dart';
 
+class PredictionResult {
+  final DateTime timestamp;
+  final KeyPoints keyPoints;
+  final Duration duration;
+  const PredictionResult(this.timestamp, this.keyPoints, this.duration);
+}
+
 class Predictor {
   bool _initialized = false;
   bool _busy = false;
@@ -38,7 +45,7 @@ class Predictor {
         return null;
       }
       final kp = KeyPoints.fromPoseNet(res[0]);
-      return PredictionResult(kp, DateTime.now().difference(ts));
+      return PredictionResult(ts, kp, DateTime.now().difference(ts));
     } catch (e) {
       rethrow;
     } finally {
@@ -50,10 +57,4 @@ class Predictor {
 class ResourceIsBusy extends Error {
   @override
   String toString() => "Resource is busy";
-}
-
-class PredictionResult {
-  final KeyPoints keyPoints;
-  final Duration duration;
-  const PredictionResult(this.keyPoints, this.duration);
 }
